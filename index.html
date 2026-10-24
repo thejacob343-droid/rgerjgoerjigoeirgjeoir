@@ -1,0 +1,837 @@
+<!doctype html>
+<html lang="pl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Licznik kalorii</title>
+<meta name="description" content="Prosty licznik kalorii. Wpisujesz, co zjadłeś, a strona liczy kalorie dnia.">
+<meta name="theme-color" id="tc" content="#EDF0F4">
+<script>
+(function () {
+  var t = null;
+  try { t = localStorage.getItem('licznik-kalorii:theme'); } catch (e) {}
+  if (t === 'dark' || t === 'light') document.documentElement.setAttribute('data-theme', t);
+  else t = (window.matchMedia && matchMedia('(prefers-color-scheme: dark)').matches) ? 'dark' : 'light';
+  var m = document.getElementById('tc');
+  if (m) m.setAttribute('content', t === 'dark' ? '#0E1320' : '#EDF0F4');
+})();
+</script>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon-192.png" type="image/png">
+<link rel="apple-touch-icon" href="icon-192.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Familjen+Grotesk:wght@500;700&family=Hanken+Grotesk:wght@400;500;600&display=swap">
+<style>
+/* Layout: one phone-width column. Day switcher, one bold summary card (kcal left today), add-food card with search and picker, then the day's log grouped by meal. */
+:root {
+  --bg: #EDF0F4;
+  --surface: #FFFFFF;
+  --ink: #172033;
+  --muted: #5D6A80;
+  --line: #D8DEE8;
+  --tile: #E4EAF4;
+  --accent: #2456E8;
+  --warn: #C93F2A;
+  --on-accent: #FFFFFF;
+  --font-display: "Familjen Grotesk", "Avenir Next", "Segoe UI", system-ui, sans-serif;
+  --font-body: "Hanken Grotesk", "Segoe UI", system-ui, -apple-system, sans-serif;
+  color-scheme: light;
+  padding-top: env(safe-area-inset-top, 0px);
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0E1320;
+    --surface: #161D2E;
+    --ink: #E8ECF5;
+    --muted: #94A1B9;
+    --line: #27314A;
+    --tile: #1F2842;
+    --accent: #7399FF;
+    --warn: #FF8069;
+    --on-accent: #0B1020;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0E1320;
+  --surface: #161D2E;
+  --ink: #E8ECF5;
+  --muted: #94A1B9;
+  --line: #27314A;
+  --tile: #1F2842;
+  --accent: #7399FF;
+  --warn: #FF8069;
+  --on-accent: #0B1020;
+  color-scheme: dark;
+}
+
+html { -webkit-text-size-adjust: 100%; }
+[hidden] { display: none !important; }
+img { max-width: 100%; }
+* { box-sizing: border-box; }
+body {
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--font-body);
+  font-size: 16px;
+  line-height: 1.4;
+  margin: 0;
+  padding-block: 12px 110px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+}
+.wrap { max-width: 520px; margin: 0 auto; display: grid; gap: 12px; }
+.num { font-variant-numeric: tabular-nums; }
+button, input, select { font: inherit; color: inherit; }
+button { cursor: pointer; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* brand row */
+.brand { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.brand b { font-family: var(--font-display); font-size: 18px; font-weight: 700; }
+.themebtn {
+  width: 44px; height: 44px; border-radius: 12px; border: 1px solid var(--line);
+  background: var(--surface); display: grid; place-items: center; padding: 0;
+}
+
+/* day switcher */
+.top { display: grid; grid-template-columns: 44px minmax(0, 1fr) 44px; align-items: center; gap: 8px; }
+.icbtn {
+  width: 44px; height: 44px; border-radius: 12px; border: 1px solid var(--line);
+  background: var(--surface); display: grid; place-items: center; padding: 0;
+}
+.icbtn:disabled { opacity: .35; cursor: default; }
+.dt { text-align: center; min-width: 0; }
+.dtl { font-family: var(--font-display); font-weight: 700; font-size: 24px; line-height: 1.1; }
+.dts { font-size: 13px; color: var(--muted); }
+
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: 16px; padding: 16px; }
+
+/* summary: the single bold element */
+.summary { background: var(--accent); border-color: transparent; color: var(--on-accent); }
+.summary.over { background: var(--warn); }
+.remlbl { font-size: 13px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; opacity: .85; }
+.remrow { display: flex; align-items: baseline; gap: 8px; margin-top: 2px; }
+.remval { font-family: var(--font-display); font-weight: 700; font-size: 60px; line-height: 1; font-variant-numeric: tabular-nums; }
+.remunit { font-size: 16px; opacity: .85; }
+.bar {
+  height: 10px; border-radius: 99px; margin-top: 14px; overflow: hidden;
+  background: color-mix(in srgb, var(--on-accent) 25%, transparent);
+}
+.bar i { display: block; height: 100%; width: 0; background: var(--on-accent); border-radius: 99px; transition: width .3s ease; }
+.stats { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 14px; }
+.stat span.l { display: block; font-size: 12px; opacity: .85; }
+.stat b { font-family: var(--font-display); font-size: 22px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.goalrow { display: flex; align-items: baseline; gap: 6px; }
+.goalrow input {
+  width: 84px; background: transparent; border: 0; border-bottom: 1.5px solid color-mix(in srgb, var(--on-accent) 55%, transparent);
+  border-radius: 0; padding: 0 0 2px; color: var(--on-accent);
+  font-family: var(--font-display); font-weight: 700; font-size: 22px; font-variant-numeric: tabular-nums;
+  -moz-appearance: textfield;
+}
+.goalrow input::-webkit-outer-spin-button, .goalrow input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+.goalrow input:focus-visible { outline-color: var(--on-accent); }
+.goalrow span { font-size: 14px; opacity: .85; }
+
+/* add card */
+.lab { display: block; font-weight: 600; margin-bottom: 8px; }
+.q {
+  width: 100%; min-height: 50px; border-radius: 12px; border: 1.5px solid var(--line);
+  background: var(--bg); padding: 0 14px; font-size: 17px; -webkit-appearance: none; appearance: none;
+}
+.q::placeholder { color: var(--muted); }
+.q:disabled { opacity: .6; }
+.sug { list-style: none; margin: 8px 0 0; padding: 0; }
+.sug li + li { border-top: 1px solid var(--line); }
+.sg {
+  width: 100%; background: none; border: 0; text-align: left; padding: 12px 2px; min-height: 48px;
+  display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 12px; align-items: center;
+}
+.sg .n { overflow-wrap: anywhere; }
+.sg .k { font-size: 13px; color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.sg.own { color: var(--accent); font-weight: 600; display: block; }
+.none { padding: 12px 2px; color: var(--muted); font-size: 15px; }
+.quick { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+.quick .hint { width: 100%; font-size: 13px; color: var(--muted); }
+.chip {
+  min-height: 40px; padding: 0 14px; border-radius: 99px; border: 1px solid var(--line);
+  background: var(--surface); font-size: 15px;
+}
+.chip[aria-pressed="true"] { background: var(--ink); color: var(--bg); border-color: var(--ink); }
+
+/* picker */
+.picker { background: var(--tile); border-radius: 12px; padding: 14px; display: grid; gap: 12px; }
+.ptitle { display: grid; gap: 2px; }
+.ptitle b { font-family: var(--font-display); font-size: 20px; line-height: 1.2; overflow-wrap: anywhere; }
+.ptitle span { font-size: 13px; color: var(--muted); }
+.field { display: grid; gap: 4px; }
+.field > label, .grp-l { font-size: 13px; color: var(--muted); font-weight: 600; }
+.arow { display: grid; grid-template-columns: 110px minmax(0, 1fr); gap: 8px; }
+.in {
+  width: 100%; min-height: 46px; border-radius: 10px; border: 1.5px solid var(--line);
+  background: var(--surface); padding: 0 12px; font-size: 17px; -webkit-appearance: none; appearance: none;
+  font-variant-numeric: tabular-nums;
+}
+select.in { padding-right: 28px; background-image: linear-gradient(45deg, transparent 50%, var(--muted) 50%), linear-gradient(135deg, var(--muted) 50%, transparent 50%); background-position: calc(100% - 17px) 20px, calc(100% - 12px) 20px; background-size: 5px 5px; background-repeat: no-repeat; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.chk { display: flex; gap: 8px; align-items: center; font-size: 15px; }
+.chk input { width: 20px; height: 20px; accent-color: var(--accent); }
+.res { font-family: var(--font-display); font-weight: 700; font-size: 26px; font-variant-numeric: tabular-nums; }
+.res small { font-family: var(--font-body); font-weight: 500; font-size: 14px; color: var(--muted); margin-left: 4px; }
+.btns { display: grid; grid-template-columns: 1fr auto; gap: 8px; }
+.btn {
+  min-height: 48px; border-radius: 12px; border: 1px solid var(--line); background: var(--surface);
+  padding: 0 18px; font-weight: 600;
+}
+.btn.pri { background: var(--accent); color: var(--on-accent); border-color: transparent; }
+.btn:disabled { opacity: .45; cursor: default; }
+
+/* log */
+#log { display: grid; gap: 12px; }
+.state { margin: 0; padding: 20px 16px; text-align: center; color: var(--muted); border: 1.5px dashed var(--line); border-radius: 16px; font-size: 15px; }
+.state.err { color: var(--warn); }
+.grp .gh { display: flex; justify-content: space-between; align-items: baseline; padding: 0 4px 6px; gap: 8px; }
+.grp h2 { margin: 0; font-size: 13px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); font-weight: 600; }
+.grp .gh .num { font-size: 14px; color: var(--muted); font-weight: 600; }
+.ents { list-style: none; margin: 0; padding: 0 14px; background: var(--surface); border: 1px solid var(--line); border-radius: 16px; }
+.ent { display: grid; grid-template-columns: minmax(0, 1fr) auto 40px; gap: 8px; align-items: center; padding: 8px 0; }
+.ent + .ent { border-top: 1px solid var(--line); }
+.en { min-width: 0; }
+.nm { display: block; font-weight: 500; overflow-wrap: anywhere; }
+.qt { display: block; font-size: 13px; color: var(--muted); }
+.kc { font-family: var(--font-display); font-weight: 700; font-size: 18px; font-variant-numeric: tabular-nums; }
+.del { width: 40px; height: 40px; border-radius: 10px; border: 0; background: none; color: var(--muted); display: grid; place-items: center; padding: 0; }
+.del:hover { color: var(--warn); }
+
+.backup { display: grid; gap: 10px; }
+.backup .lab { margin: 0; }
+.backup p { margin: 0; }
+.btns2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.note { font-size: 13px; color: var(--muted); margin: 0; }
+.note.warnbox { color: var(--warn); }
+
+.toast {
+  position: fixed; z-index: 20;
+  left: max(16px, env(safe-area-inset-left, 0px)); right: max(16px, env(safe-area-inset-right, 0px));
+  bottom: calc(16px + env(safe-area-inset-bottom, 0px));
+  max-width: 488px; margin: 0 auto;
+  background: var(--ink); color: var(--bg); border-radius: 12px; padding: 6px 6px 6px 16px;
+  display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 48px; font-size: 15px;
+}
+.toast button { background: none; border: 0; color: var(--bg); font-weight: 700; text-decoration: underline; min-height: 40px; padding: 0 12px; }
+
+@media (prefers-reduced-motion: reduce) { .bar i { transition: none; } }
+@media (max-width: 380px) {
+  .remval { font-size: 52px; }
+  .arow { grid-template-columns: 96px minmax(0, 1fr); }
+}
+</style>
+
+</head>
+<body>
+<div class="wrap">
+  <div class="brand"><b>Licznik kalorii</b><button type="button" class="themebtn" id="theme" aria-label="Włącz ciemny motyw"></button></div>
+  <header class="top">
+    <button type="button" class="icbtn" id="prev" aria-label="Poprzedni dzień">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg>
+    </button>
+    <div class="dt"><div class="dtl" id="dlabel">Dziś</div><div class="dts" id="dsub"></div></div>
+    <button type="button" class="icbtn" id="next" aria-label="Następny dzień">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 5l7 7-7 7"/></svg>
+    </button>
+  </header>
+
+  <section class="card summary" id="summary" aria-live="polite">
+    <div class="remlbl" id="remlbl">Zostało</div>
+    <div class="remrow"><span class="remval" id="remval">0</span><span class="remunit">kcal</span></div>
+    <div class="bar" aria-hidden="true"><i id="barfill"></i></div>
+    <div class="stats">
+      <div class="stat"><span class="l">Zjedzone</span><b id="eaten">0</b> <span class="remunit">kcal</span></div>
+      <div class="stat"><label class="l" for="goal" style="display:block;font-size:12px;opacity:.85">Cel dzienny</label>
+        <div class="goalrow"><input id="goal" type="number" inputmode="numeric" min="500" max="10000" step="50" value="2000"><span>kcal</span></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="card" id="addcard">
+    <div id="searchbox">
+      <label class="lab" for="q">Co zjadłeś?</label>
+      <input class="q" id="q" type="search" autocomplete="off" autocapitalize="off" spellcheck="false" enterkeyhint="search" placeholder="np. banan, kurczak, jogurt" disabled>
+      <ul class="sug" id="sug"></ul>
+      <div class="quick" id="quick">
+        <span class="hint">Częste produkty</span>
+        <button type="button" class="chip" data-quick="Banan">Banan</button>
+        <button type="button" class="chip" data-quick="Jajko kurze">Jajko</button>
+        <button type="button" class="chip" data-quick="Chleb pszenny">Chleb</button>
+        <button type="button" class="chip" data-quick="Pierś z kurczaka (pieczona)">Kurczak</button>
+        <button type="button" class="chip" data-quick="Jogurt naturalny">Jogurt</button>
+        <button type="button" class="chip" data-quick="Jabłko">Jabłko</button>
+      </div>
+    </div>
+    <div class="picker" id="picker" hidden></div>
+  </section>
+
+  <div id="log"></div>
+
+  <section class="card backup">
+    <span class="lab">Kopia zapasowa</span>
+    <p class="note">Dziennik jest zapisany w tej przeglądarce. Jeśli wyczyścisz dane strony, zniknie. Pobierz kopię do pliku, żeby go nie stracić albo przenieść na inny telefon.</p>
+    <div class="btns2">
+      <button type="button" class="btn" id="export">Pobierz kopię</button>
+      <button type="button" class="btn" id="import">Wczytaj kopię</button>
+    </div>
+    <input type="file" id="file" accept="application/json,.json" hidden>
+  </section>
+
+  <p class="note" id="storenote" hidden></p>
+  <p class="note">Wartości są orientacyjne. Dla dań z opakowania użyj „Własny produkt" i wpisz kalorie z etykiety.</p>
+</div>
+
+<div class="toast" id="toast" role="status" hidden></div>
+
+<script>
+(function () {
+  'use strict';
+
+  function F(n, k, u, s, b) { return { n: n, k: k, u: u || null, s: s || 0, b: b || 'g' }; }
+
+  /* kcal on 100 g (or 100 ml), optional portion unit with its size */
+  var FOODS = [
+    // pieczywo, zboża, dania mączne
+    F('Chleb pszenny', 250, 'kromka', 35), F('Chleb razowy', 220, 'kromka', 40),
+    F('Bułka pszenna', 275, 'szt.', 60), F('Grahamka', 245, 'szt.', 60),
+    F('Tortilla pszenna', 310, 'szt.', 60), F('Croissant', 400, 'szt.', 60),
+    F('Wafle ryżowe', 385, 'szt.', 8), F('Płatki owsiane', 370, 'łyżka', 10),
+    F('Płatki kukurydziane', 375, 'porcja', 30), F('Musli', 360, 'porcja', 50),
+    F('Granola', 450, 'porcja', 40),
+    F('Ryż biały (suchy)', 350, 'porcja', 75), F('Ryż biały (ugotowany)', 130, 'porcja', 150),
+    F('Makaron (suchy)', 350, 'porcja', 80), F('Makaron (ugotowany)', 150, 'porcja', 200),
+    F('Kasza gryczana (sucha)', 340, 'porcja', 80), F('Kasza gryczana (ugotowana)', 110, 'porcja', 150),
+    F('Kasza jaglana (ugotowana)', 120, 'porcja', 150),
+    F('Ziemniaki (gotowane)', 77, 'szt.', 90), F('Frytki', 300, 'porcja', 150),
+    F('Pizza', 270, 'kawałek', 120), F('Naleśnik', 190, 'szt.', 80),
+    F('Pierogi ruskie', 190, 'szt.', 40), F('Placek ziemniaczany', 230, 'szt.', 60),
+    // mięso i ryby
+    F('Pierś z kurczaka (surowa)', 110, 'porcja', 150), F('Pierś z kurczaka (pieczona)', 165, 'porcja', 120),
+    F('Udko z kurczaka (surowe)', 160, 'porcja', 150), F('Pierś z indyka (surowa)', 110, 'porcja', 150),
+    F('Mięso mielone z indyka', 150, 'porcja', 120), F('Wołowina mielona', 230, 'porcja', 120), F('Schab (surowy)', 145, 'porcja', 150),
+    F('Karkówka', 260, 'porcja', 150), F('Kotlet schabowy', 290, 'szt.', 130),
+    F('Szynka drobiowa', 110, 'plasterek', 15), F('Szynka wieprzowa', 130, 'plasterek', 15),
+    F('Parówka', 270, 'szt.', 50), F('Kiełbasa', 300, 'porcja', 80), F('Boczek', 430, 'porcja', 30),
+    F('Łosoś', 200, 'porcja', 150), F('Dorsz', 80, 'porcja', 150), F('Tuńczyk w puszce (w wodzie)', 110, 'puszka', 120),
+    // jajka, nabiał
+    F('Jajko kurze', 142, 'szt.', 55),
+    F('Mleko 2%', 50, 'szklanka', 250, 'ml'), F('Mleko 3,2%', 60, 'szklanka', 250, 'ml'),
+    F('Kefir', 55, 'szklanka', 250, 'ml'),
+    F('Jogurt naturalny', 60, 'kubek', 150), F('Jogurt grecki', 115, 'kubek', 150), F('Jogurt owocowy', 95, 'kubek', 150),
+    F('Twaróg półtłusty', 135, 'porcja', 100), F('Twaróg chudy', 100, 'porcja', 100), F('Serek wiejski', 100, 'kubek', 150),
+    F('Ser żółty', 350, 'plasterek', 20), F('Mozzarella', 250, 'porcja', 70), F('Ser feta', 260, 'porcja', 50), F('Parmezan (starty)', 400, 'łyżka', 8),
+    F('Śmietana 18%', 190, 'łyżka', 20), F('Masło', 740, 'łyżeczka', 5), F('Serek śmietankowy', 250, 'łyżka', 20),
+    // tłuszcze i dodatki
+    F('Oliwa z oliwek', 880, 'łyżka', 10), F('Olej rzepakowy', 900, 'łyżka', 10),
+    F('Miód', 320, 'łyżeczka', 7), F('Cukier', 400, 'łyżeczka', 5), F('Dżem', 250, 'łyżeczka', 12),
+    F('Krem czekoladowy', 540, 'łyżeczka', 10), F('Masło orzechowe', 600, 'łyżka', 16),
+    F('Majonez', 680, 'łyżka', 15), F('Ketchup', 100, 'łyżka', 17), F('Hummus', 230, 'łyżka', 20),
+    // owoce
+    F('Banan', 90, 'szt.', 120), F('Jabłko', 52, 'szt.', 180), F('Gruszka', 57, 'szt.', 170),
+    F('Pomarańcza', 47, 'szt.', 200), F('Mandarynka', 53, 'szt.', 80), F('Winogrona', 70, 'garść', 80),
+    F('Truskawki', 32, 'garść', 100), F('Maliny', 50, 'garść', 60), F('Borówki', 57, 'garść', 60),
+    F('Arbuz', 30, 'porcja', 200), F('Kiwi', 61, 'szt.', 75), F('Ananas', 50, 'porcja', 150), F('Mango', 60, 'porcja', 150),
+    F('Awokado', 160, 'szt.', 150), F('Śliwki', 46, 'szt.', 40), F('Brzoskwinia', 40, 'szt.', 150),
+    F('Morele suszone', 240, 'garść', 30), F('Rodzynki', 300, 'garść', 30), F('Daktyle', 280, 'szt.', 10),
+    F('Mieszanka owoców (mrożona)', 50, 'porcja', 150),
+    // warzywa i strączkowe
+    F('Marchew', 40, 'szt.', 80), F('Ogórek', 15, 'szt.', 150), F('Pomidor', 18, 'szt.', 120),
+    F('Papryka', 30, 'szt.', 150), F('Sałata', 14, 'porcja', 50), F('Brokuł', 34, 'porcja', 150), F('Cukinia', 17, 'porcja', 150),
+    F('Cebula', 40, 'szt.', 100), F('Szpinak', 23, 'porcja', 100), F('Kapusta', 25, 'porcja', 150), F('Pieczarki', 22, 'porcja', 100), F('Burak', 43, 'porcja', 100),
+    F('Kukurydza (konserwowa)', 85, 'porcja', 100), F('Groszek zielony', 80, 'porcja', 80),
+    F('Fasola czerwona (ugotowana)', 120, 'porcja', 120), F('Ciecierzyca (ugotowana)', 165, 'porcja', 120), F('Soczewica (ugotowana)', 115, 'porcja', 120),
+    // orzechy
+    F('Orzechy włoskie', 650, 'garść', 30), F('Migdały', 580, 'garść', 30), F('Orzeszki ziemne', 570, 'garść', 30),
+    F('Orzechy nerkowca', 580, 'garść', 30), F('Pestki słonecznika', 580, 'łyżka', 10), F('Pestki dyni', 560, 'łyżka', 10),
+    // słodycze, przekąski
+    F('Czekolada mleczna', 540, 'kostka', 6), F('Czekolada gorzka', 560, 'kostka', 6),
+    F('Herbatnik', 440, 'szt.', 7), F('Wafelek', 520, 'szt.', 40), F('Baton zbożowy', 400, 'szt.', 25),
+    F('Lody', 200, 'gałka', 60), F('Żelki', 340, 'garść', 30), F('Chipsy', 540, 'garść', 30),
+    F('Paluszki', 380, 'garść', 30), F('Pączek', 370, 'szt.', 70), F('Budyń', 95, 'porcja', 250),
+    // napoje
+    F('Cola', 42, 'puszka', 330, 'ml'), F('Sok pomarańczowy', 45, 'szklanka', 250, 'ml'),
+    F('Sok jabłkowy', 46, 'szklanka', 250, 'ml'), F('Piwo', 43, 'butelka', 500, 'ml'),
+    F('Wino', 83, 'kieliszek', 150, 'ml'), F('Mleko owsiane', 45, 'szklanka', 250, 'ml'),
+    F('Mleko sojowe', 40, 'szklanka', 250, 'ml'), F('Kawa czarna', 2, 'filiżanka', 200, 'ml'),
+    F('Kawa z mlekiem', 30, 'kubek', 250, 'ml'), F('Latte', 55, 'kubek', 300, 'ml'),
+    F('Herbata (bez cukru)', 1, 'kubek', 250, 'ml'), F('Woda', 0, 'szklanka', 250, 'ml'),
+    F('Odżywka białkowa (proszek)', 400, 'miarka', 30),
+    // dania
+    F('Zupa pomidorowa', 50, 'talerz', 300), F('Rosół', 20, 'talerz', 300), F('Zupa jarzynowa', 40, 'talerz', 300),
+    F('Bigos', 120, 'porcja', 250), F('Spaghetti bolognese', 150, 'porcja', 350),
+    F('Hamburger', 250, 'szt.', 200), F('Kebab w picie', 215, 'szt.', 350)
+  ];
+  FOODS.forEach(function (f) { f.x = norm(f.n); });
+
+  var MEALS = [['sniadanie', 'Śniadanie'], ['obiad', 'Obiad'], ['kolacja', 'Kolacja'], ['przekaski', 'Przekąski']];
+
+  var state = {
+    date: ymd(new Date()), entries: [], goal: 2000, custom: [], meal: defaultMeal(),
+    picker: null, sug: [], loading: false, loadFailed: false
+  };
+
+  function $(id) { return document.getElementById(id); }
+  function norm(s) { return String(s).toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/ł/g, 'l'); }
+  function esc(s) { return String(s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
+  function fmt(n) { return Math.round(n).toLocaleString('pl-PL'); }
+  function fmtQty(n) { return n.toLocaleString('pl-PL', { maximumFractionDigits: 1 }); }
+  function uid() { return Math.random().toString(36).slice(2, 9) + Date.now().toString(36); }
+  function cap(s) { return s.charAt(0).toUpperCase() + s.slice(1); }
+
+  function ymd(d) { return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); }
+  function parse(s) { var p = s.split('-').map(Number); return new Date(p[0], p[1] - 1, p[2], 12); }
+  function shift(s, n) { var d = parse(s); d.setDate(d.getDate() + n); return ymd(d); }
+  function defaultMeal() {
+    var h = new Date().getHours();
+    if (h < 10) return 'sniadanie';
+    if (h < 12) return 'przekaski';
+    if (h < 16) return 'obiad';
+    if (h < 18) return 'przekaski';
+    if (h < 22) return 'kolacja';
+    return 'przekaski';
+  }
+
+  /* ---------- storage: localStorage in this browser ---------- */
+  var KEY = 'licznik-kalorii:v1';
+  var DB = { goal: 2000, custom: [], days: {} };
+  var storeMode = 'local';
+
+  function isCustom(c) { return c && typeof c.n === 'string' && c.t === 1 && Number(c.k) > 0; }
+
+  function loadAll() {
+    try {
+      localStorage.setItem(KEY + ':t', '1'); localStorage.removeItem(KEY + ':t');
+    } catch (e) { storeMode = 'mem'; return; }
+    try {
+      var v = localStorage.getItem(KEY);
+      if (!v) return;
+      var o = JSON.parse(v);
+      if (o && typeof o === 'object') {
+        if (o.goal >= 500 && o.goal <= 10000) DB.goal = o.goal;
+        if (Array.isArray(o.custom)) DB.custom = o.custom.filter(isCustom);
+        if (o.days && typeof o.days === 'object') DB.days = o.days;
+      }
+    } catch (e) { /* damaged data: start empty, do not overwrite until the user adds something */ }
+  }
+
+  function persist() {
+    if (storeMode !== 'local') return;
+    try { localStorage.setItem(KEY, JSON.stringify(DB)); }
+    catch (e) { storeMode = 'mem'; renderNote(); toast('Nie udało się zapisać zmian w tej przeglądarce.'); }
+  }
+
+  function saveDay() {
+    if (state.entries.length) DB.days[state.date] = state.entries.slice();
+    else delete DB.days[state.date];
+    persist();
+  }
+  function saveSettings() { DB.goal = state.goal; DB.custom = state.custom.slice(); persist(); }
+
+  /* ---------- search ---------- */
+  function allFoods() {
+    return state.custom.map(function (c) { return { n: c.n, k: c.k, u: null, s: 0, b: 'g', x: norm(c.n), c: true, t: true }; }).concat(FOODS);
+  }
+  function search(q) {
+    var toks = norm(q).split(/\s+/).filter(Boolean);
+    if (!toks.length) return [];
+    var res = [];
+    allFoods().forEach(function (f) {
+      if (!toks.every(function (t) { return f.x.indexOf(t) >= 0; })) return;
+      var words = f.x.split(/[\s(),]+/);
+      var sc = f.x.indexOf(toks[0]) === 0 ? 0 : (words.some(function (w) { return w.indexOf(toks[0]) === 0; }) ? 1 : 2);
+      if (f.c) sc -= 0.5;
+      res.push({ f: f, sc: sc });
+    });
+    res.sort(function (a, b) { return a.sc - b.sc || a.f.n.length - b.f.n.length; });
+    return res.slice(0, 7).map(function (r) { return r.f; });
+  }
+
+  function renderSug() {
+    var q = $('q').value.trim();
+    var sug = $('sug');
+    $('quick').hidden = !!q;
+    if (!q) { sug.innerHTML = ''; state.sug = []; return; }
+    state.sug = search(q);
+    var html = state.sug.map(function (f, i) {
+      return '<li><button type="button" class="sg" data-i="' + i + '"><span class="n">' + esc(f.n) + '</span><span class="k">' + portionLabel(f) + '</span></button></li>';
+    }).join('');
+    if (!state.sug.length) html += '<li class="none">Tego nie ma w bazie.</li>';
+    if (q.length >= 2) html += '<li><button type="button" class="sg own" data-own="1">+ Własny produkt „' + esc(q) + '"</button></li>';
+    sug.innerHTML = html;
+  }
+
+  /* ---------- picker ---------- */
+  function portionLabel(f) {
+    if (f.t) return fmt(f.k) + ' kcal';
+    return '1 ' + f.u + ' · ' + fmt(f.s * f.k / 100) + ' kcal';
+  }
+
+  function openFood(f) {
+    state.picker = f.t ? { kind: 'saved', food: f, amt: 1 } : { kind: 'food', food: f, unit: 'u', amt: 1 };
+    afterOpen();
+  }
+  function openCustom(name) {
+    state.picker = { kind: 'custom', name: name, kcal: '', save: true };
+    afterOpen();
+  }
+  function afterOpen() {
+    $('q').value = '';
+    renderSug();
+    renderPicker();
+    var first = state.picker.kind === 'custom' ? $('ckcal') : $('amt');
+    if (first) { first.focus(); if (first.select) first.select(); }
+  }
+  function closePicker() { state.picker = null; renderPicker(); }
+
+  function mealChips() {
+    return '<div class="field"><span class="grp-l">Posiłek</span><div class="chips" role="group" aria-label="Posiłek">' +
+      MEALS.map(function (m) {
+        return '<button type="button" class="chip" data-meal="' + m[0] + '" aria-pressed="' + (state.meal === m[0]) + '">' + m[1] + '</button>';
+      }).join('') + '</div></div>';
+  }
+
+  function renderPicker() {
+    var p = state.picker, el = $('picker');
+    $('searchbox').hidden = !!p;
+    if (!p) { el.hidden = true; el.innerHTML = ''; return; }
+    el.hidden = false;
+    var html = '';
+    if (p.kind === 'food') {
+      var f = p.food;
+      html += '<div class="ptitle"><b>' + esc(f.n) + '</b><span>1 ' + esc(f.u) + ' (' + f.s + ' ' + f.b + ') = ' + fmt(f.s * f.k / 100) + ' kcal</span></div>' +
+        '<div class="field"><label for="amt">Ilość</label><div class="arow">' +
+        '<input class="in" id="amt" type="number" inputmode="decimal" min="0" step="any" value="' + esc(p.amt) + '">' +
+        '<select class="in" id="unit" aria-label="Jednostka"><option value="u">' + esc(f.u) + ' (' + f.s + ' ' + f.b + ')</option><option value="b">' + f.b + '</option></select></div></div>';
+    } else if (p.kind === 'saved') {
+      html += '<div class="ptitle"><b>' + esc(p.food.n) + '</b><span>1 porcja = ' + fmt(p.food.k) + ' kcal</span></div>' +
+        '<div class="field"><label for="amt">Ilość porcji</label>' +
+        '<input class="in" id="amt" type="number" inputmode="decimal" min="0" step="any" value="' + esc(p.amt) + '"></div>';
+    } else {
+      html += '<div class="ptitle"><b>Własny produkt</b><span>Wpisz kalorie z etykiety albo własne wyliczenie.</span></div>' +
+        '<div class="field"><label for="cname">Nazwa</label><input class="in" id="cname" type="text" maxlength="60" value="' + esc(p.name) + '"></div>' +
+        '<div class="field"><label for="ckcal">Kalorie łącznie</label>' +
+        '<input class="in" id="ckcal" type="number" inputmode="decimal" min="0" step="any" value="' + esc(p.kcal) + '"></div>' +
+        '<label class="chk"><input type="checkbox" id="csave"' + (p.save ? ' checked' : '') + '> Zapamiętaj ten produkt</label>';
+    }
+    html += mealChips() +
+      '<div class="res" id="res"></div>' +
+      '<div class="btns"><button type="button" class="btn pri" id="addbtn">Dodaj do dziennika</button>' +
+      '<button type="button" class="btn" id="cancel">Anuluj</button></div>';
+    el.innerHTML = html;
+    if ($('unit')) $('unit').value = p.unit;
+    updateRes();
+  }
+
+  function calc() {
+    var p = state.picker;
+    if (!p) return null;
+    if (p.kind === 'food') {
+      var f = p.food, a = parseFloat(p.amt);
+      if (!(a > 0)) return null;
+      var grams = p.unit === 'u' ? a * f.s : a;
+      var qty = p.unit === 'u' ? fmtQty(a) + ' ' + f.u + ' (' + fmtQty(grams) + ' ' + f.b + ')' : fmtQty(a) + ' ' + f.b;
+      return { name: f.n, qty: qty, kcal: Math.round(grams * f.k / 100) };
+    }
+    if (p.kind === 'saved') {
+      var n = parseFloat(p.amt);
+      if (!(n > 0)) return null;
+      return { name: p.food.n, qty: n === 1 ? '' : '× ' + fmtQty(n), kcal: Math.round(n * p.food.k) };
+    }
+    var k = parseFloat(p.kcal);
+    if (!(k > 0)) return null;
+    return { name: (p.name || '').trim() || 'Własny wpis', qty: '', kcal: Math.round(k) };
+  }
+
+  function updateRes() {
+    var r = calc();
+    if ($('res')) $('res').innerHTML = r ? fmt(r.kcal) + '<small>kcal</small>' : '<small>Wpisz dane, żeby zobaczyć kalorie</small>';
+    if ($('addbtn')) $('addbtn').disabled = !r;
+  }
+
+  /* ---------- entries ---------- */
+  function addEntry() {
+    var r = calc();
+    if (!r || state.loading || state.loadFailed) return;
+    var p = state.picker;
+    if (p.kind === 'custom' && p.save) {
+      var key = norm(r.name);
+      state.custom = state.custom.filter(function (c) { return norm(c.n) !== key; });
+      state.custom.unshift({ n: r.name, k: Math.round(parseFloat(p.kcal)), t: 1 });
+      state.custom = state.custom.slice(0, 100);
+      saveSettings();
+    }
+    var e = { id: uid(), meal: state.meal, name: r.name, qty: r.qty, kcal: r.kcal };
+    state.entries.push(e);
+    saveDay();
+    state.picker = null;
+    renderAll();
+    toast('Dodano: ' + r.name + ' · ' + r.kcal + ' kcal', function () { dropEntry(e.id, false); });
+  }
+
+  function dropEntry(id, withUndo) {
+    var i = state.entries.findIndex(function (e) { return e.id === id; });
+    if (i < 0) return;
+    var removed = state.entries.splice(i, 1)[0];
+    saveDay();
+    renderAll();
+    if (withUndo) {
+      toast('Usunięto: ' + removed.name, function () {
+        state.entries.splice(Math.min(i, state.entries.length), 0, removed);
+        saveDay();
+        renderAll();
+      });
+    } else { hideToast(); }
+  }
+
+  /* ---------- render ---------- */
+  function total() { return state.entries.reduce(function (s, e) { return s + (Number(e.kcal) || 0); }, 0); }
+
+  function renderTop() {
+    var t = ymd(new Date());
+    var lbl = state.date === t ? 'Dziś' : state.date === shift(t, -1) ? 'Wczoraj' : cap(parse(state.date).toLocaleDateString('pl-PL', { weekday: 'long' }));
+    $('dlabel').textContent = lbl;
+    $('dsub').textContent = parse(state.date).toLocaleDateString('pl-PL', { day: 'numeric', month: 'long', year: 'numeric' });
+    $('next').disabled = state.date >= t;
+  }
+
+  function renderSummary() {
+    var t = total(), g = state.goal, rem = g - t;
+    $('summary').classList.toggle('over', rem < 0);
+    $('remlbl').textContent = rem >= 0 ? 'Zostało' : 'Powyżej celu o';
+    $('remval').textContent = fmt(Math.abs(rem));
+    $('eaten').textContent = fmt(t);
+    $('barfill').style.width = Math.min(t / g, 1) * 100 + '%';
+    if (document.activeElement !== $('goal')) $('goal').value = g;
+  }
+
+  function row(e) {
+    return '<li class="ent"><div class="en"><span class="nm">' + esc(e.name) + '</span>' +
+      (e.qty ? '<span class="qt">' + esc(e.qty) + '</span>' : '') + '</div>' +
+      '<span class="kc">' + fmt(e.kcal) + '</span>' +
+      '<button type="button" class="del" data-id="' + esc(e.id) + '" aria-label="Usuń: ' + esc(e.name) + '">' +
+      '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button></li>';
+  }
+
+  function renderLog() {
+    var el = $('log');
+    if (state.loading) { el.innerHTML = '<p class="state">Wczytuję dziennik…</p>'; return; }
+    if (state.loadFailed) { el.innerHTML = '<p class="state err">Nie udało się wczytać tego dnia. Odśwież stronę i spróbuj jeszcze raz.</p>'; return; }
+    if (!state.entries.length) { el.innerHTML = '<p class="state">Nic jeszcze nie dodano. Wpisz powyżej, co zjadłeś, np. „banan” albo „kurczak”.</p>'; return; }
+    var html = '';
+    MEALS.forEach(function (m) {
+      var list = state.entries.filter(function (e) { return e.meal === m[0]; });
+      if (!list.length) return;
+      var sum = list.reduce(function (s, e) { return s + e.kcal; }, 0);
+      html += '<section class="grp"><div class="gh"><h2>' + m[1] + '</h2><span class="num">' + fmt(sum) + ' kcal</span></div><ul class="ents">' + list.map(row).join('') + '</ul></section>';
+    });
+    el.innerHTML = html;
+  }
+
+  function renderNote() {
+    var n = $('storenote');
+    if (storeMode === 'mem') { n.hidden = false; n.textContent = 'Ta przeglądarka nie pozwala na zapis. Wpisy zostaną tylko do zamknięcia strony.'; n.className = 'note warnbox'; }
+    else n.hidden = true;
+  }
+
+  function renderAll() {
+    renderTop(); renderSummary(); renderLog(); renderPicker(); renderNote();
+    $('q').disabled = state.loading || state.loadFailed;
+  }
+
+  /* ---------- toast ---------- */
+  var tt;
+  function hideToast() { $('toast').hidden = true; clearTimeout(tt); }
+  function toast(msg, undo) {
+    var el = $('toast');
+    el.innerHTML = '<span></span>' + (undo ? '<button type="button" id="undo">Cofnij</button>' : '');
+    el.firstChild.textContent = msg;
+    el.hidden = false;
+    if (undo) $('undo').onclick = function () { hideToast(); undo(); };
+    clearTimeout(tt);
+    tt = setTimeout(hideToast, 6000);
+  }
+
+  /* ---------- day loading ---------- */
+  function go(date) {
+    hideToast();
+    state.date = date; state.picker = null;
+    var d = DB.days[date];
+    state.entries = Array.isArray(d) ? d.slice() : [];
+    renderAll();
+  }
+
+  /* ---------- events ---------- */
+  $('prev').addEventListener('click', function () { go(shift(state.date, -1)); });
+  $('next').addEventListener('click', function () { if (state.date < ymd(new Date())) go(shift(state.date, 1)); });
+
+  $('q').addEventListener('input', renderSug);
+
+  $('sug').addEventListener('click', function (ev) {
+    var b = ev.target.closest('button.sg');
+    if (!b) return;
+    if (b.getAttribute('data-own')) openCustom($('q').value.trim());
+    else openFood(state.sug[Number(b.getAttribute('data-i'))]);
+  });
+
+  $('quick').addEventListener('click', function (ev) {
+    var b = ev.target.closest('[data-quick]');
+    if (!b) return;
+    var name = b.getAttribute('data-quick');
+    var f = FOODS.find(function (x) { return x.n === name; });
+    if (f) openFood(f);
+  });
+
+  $('picker').addEventListener('input', function (ev) {
+    var p = state.picker, t = ev.target;
+    if (!p) return;
+    if (t.id === 'amt') p.amt = t.value;
+    else if (t.id === 'ckcal') p.kcal = t.value;
+    else if (t.id === 'cname') p.name = t.value;
+    else if (t.id === 'csave') p.save = t.checked;
+    else return;
+    updateRes();
+  });
+
+  $('picker').addEventListener('change', function (ev) {
+    var p = state.picker, t = ev.target;
+    if (!p) return;
+    if (t.id === 'unit') { p.unit = t.value; p.amt = p.unit === 'u' ? 1 : 100; $('amt').value = p.amt; updateRes(); }
+  });
+
+  $('picker').addEventListener('click', function (ev) {
+    var p = state.picker, t = ev.target;
+    if (!p) return;
+    var meal = t.closest('[data-meal]');
+    if (meal) {
+      state.meal = meal.getAttribute('data-meal');
+      Array.prototype.forEach.call($('picker').querySelectorAll('[data-meal]'), function (b) {
+        b.setAttribute('aria-pressed', String(b.getAttribute('data-meal') === state.meal));
+      });
+      return;
+    }
+    if (t.closest('#addbtn')) { addEntry(); return; }
+    if (t.closest('#cancel')) { closePicker(); }
+  });
+
+  $('picker').addEventListener('keydown', function (ev) {
+    if (ev.key === 'Enter' && ev.target.tagName === 'INPUT' && ev.target.type !== 'checkbox') { ev.preventDefault(); addEntry(); }
+  });
+
+  $('log').addEventListener('click', function (ev) {
+    var b = ev.target.closest('.del');
+    if (b) dropEntry(b.getAttribute('data-id'), true);
+  });
+
+  $('goal').addEventListener('change', function () {
+    var v = parseInt($('goal').value, 10);
+    if (v >= 500 && v <= 10000) { state.goal = v; saveSettings(); }
+    renderSummary();
+    $('goal').value = state.goal;
+  });
+
+  /* ---------- theme ---------- */
+  var THEME_KEY = 'licznik-kalorii:theme';
+  var ICON_MOON = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 13.2A8.5 8.5 0 1 1 10.8 3a6.6 6.6 0 0 0 10.2 10.2z"/></svg>';
+  var ICON_SUN = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>';
+
+  function currentTheme() {
+    var a = document.documentElement.getAttribute('data-theme');
+    if (a === 'dark' || a === 'light') return a;
+    return (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) ? 'dark' : 'light';
+  }
+  function paintTheme() {
+    var t = currentTheme();
+    $('theme').innerHTML = t === 'dark' ? ICON_SUN : ICON_MOON;
+    $('theme').setAttribute('aria-label', t === 'dark' ? 'Włącz jasny motyw' : 'Włącz ciemny motyw');
+    var m = $('tc');
+    if (m) m.setAttribute('content', t === 'dark' ? '#0E1320' : '#EDF0F4');
+  }
+  $('theme').addEventListener('click', function () {
+    var next = currentTheme() === 'dark' ? 'light' : 'dark';
+    document.documentElement.setAttribute('data-theme', next);
+    try { localStorage.setItem(THEME_KEY, next); } catch (e) { /* the choice still applies until the page closes */ }
+    paintTheme();
+  });
+  if (window.matchMedia) {
+    try {
+      window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', function () {
+        if (!document.documentElement.getAttribute('data-theme')) paintTheme();
+      });
+    } catch (e) { /* older browsers */ }
+  }
+
+  /* ---------- backup ---------- */
+  $('export').addEventListener('click', function () {
+    var data = { app: 'licznik-kalorii', version: 1, exported: new Date().toISOString(), goal: DB.goal, custom: DB.custom, days: DB.days };
+    var blob = new Blob([JSON.stringify(data, null, 1)], { type: 'application/json' });
+    var a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'licznik-kalorii-' + ymd(new Date()) + '.json';
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(function () { URL.revokeObjectURL(a.href); }, 1500);
+    toast('Pobrano kopię dziennika.');
+  });
+
+  $('import').addEventListener('click', function () { $('file').click(); });
+
+  function cleanDays(days) {
+    var out = {};
+    Object.keys(days).forEach(function (k) {
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(k) || !Array.isArray(days[k])) return;
+      var list = days[k].filter(function (e) {
+        return e && typeof e.name === 'string' && isFinite(Number(e.kcal)) && MEALS.some(function (m) { return m[0] === e.meal; });
+      }).map(function (e) {
+        return { id: String(e.id || uid()).slice(0, 40), meal: e.meal, name: e.name.slice(0, 80), qty: String(e.qty || '').slice(0, 60), kcal: Math.round(Number(e.kcal)) };
+      });
+      if (list.length) out[k] = list;
+    });
+    return out;
+  }
+
+  $('file').addEventListener('change', function () {
+    var f = $('file').files[0];
+    if (!f) return;
+    var r = new FileReader();
+    r.onload = function () {
+      try {
+        var o = JSON.parse(r.result);
+        if (!o || o.app !== 'licznik-kalorii' || !o.days || typeof o.days !== 'object') throw new Error('format');
+        if (!confirm('Wczytanie kopii zastąpi cały obecny dziennik. Kontynuować?')) { $('file').value = ''; return; }
+        DB.goal = (o.goal >= 500 && o.goal <= 10000) ? o.goal : 2000;
+        DB.custom = (Array.isArray(o.custom) ? o.custom : []).filter(isCustom).map(function (c) { return { n: c.n.slice(0, 60), k: Math.round(Number(c.k)), t: 1 }; }).slice(0, 100);
+        DB.days = cleanDays(o.days);
+        persist();
+        state.goal = DB.goal; state.custom = DB.custom.slice();
+        go(state.date);
+        toast('Wczytano kopię dziennika.');
+      } catch (e) { toast('Ten plik nie wygląda na kopię licznika.'); }
+      $('file').value = '';
+    };
+    r.readAsText(f);
+  });
+
+  /* ---------- boot ---------- */
+  paintTheme();
+  loadAll();
+  state.goal = DB.goal;
+  state.custom = DB.custom.slice();
+  go(state.date);
+  renderSug();
+  $('q').disabled = false;
+
+  if ('serviceWorker' in navigator && /^https?:$/.test(location.protocol)) {
+    window.addEventListener('load', function () { navigator.serviceWorker.register('sw.js').catch(function () {}); });
+  }
+  if (navigator.storage && navigator.storage.persist) { navigator.storage.persist().catch(function () {}); }
+})();
+</script>
+</body>
+</html>
